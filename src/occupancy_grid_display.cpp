@@ -46,8 +46,10 @@
 #include "rviz/properties/enum_property.h"
 #include "rviz/properties/float_property.h"
 
+#include <cv_bridge/rgb_colors.h>
 #include <octomap/octomap.h>
 #include <octomap/ColorOcTree.h>
+#include <octomap/LabelOccupancyOcTree.h>
 #include <octomap_msgs/Octomap.h>
 #include <octomap_msgs/conversions.h>
 
@@ -73,6 +75,7 @@ enum OctreeVoxelColorMode
   OCTOMAP_CELL_COLOR,
   OCTOMAP_Z_AXIS_COLOR,
   OCTOMAP_PROBABLILTY_COLOR,
+  OCTOMAP_LABEL_COLOR,
 };
 
 OccupancyGridDisplay::OccupancyGridDisplay() :
@@ -116,6 +119,7 @@ OccupancyGridDisplay::OccupancyGridDisplay() :
   octree_coloring_property_->addOption( "Cell Color",  OCTOMAP_CELL_COLOR );
   octree_coloring_property_->addOption( "Z-Axis",  OCTOMAP_Z_AXIS_COLOR );
   octree_coloring_property_->addOption( "Cell Probability",  OCTOMAP_PROBABLILTY_COLOR );
+  octree_coloring_property_->addOption( "Label Color", OCTOMAP_LABEL_COLOR );
   alpha_property_ = new rviz::FloatProperty( "Voxel Alpha", 1.0, "Set voxel transparency alpha",
                                              this, 
                                              SLOT( updateAlpha() ) );
@@ -391,6 +395,13 @@ bool TemplatedOccupancyGridDisplay<octomap::ColorOcTree>::checkType(std::string 
   else return false;
 }
 
+template <>
+bool TemplatedOccupancyGridDisplay<octomap::LabelOccupancyOcTree>::checkType(std::string type_id)
+{
+  if (type_id == "LabelOccupancyOcTree") return true;
+  else return false;
+}
+
 template <typename OcTreeType>
 void TemplatedOccupancyGridDisplay<OcTreeType>::setVoxelColor(PointCloud::Point& newPoint, 
                                                               typename OcTreeType::NodeType& node,
@@ -398,6 +409,7 @@ void TemplatedOccupancyGridDisplay<OcTreeType>::setVoxelColor(PointCloud::Point&
 {
   OctreeVoxelColorMode octree_color_mode = static_cast<OctreeVoxelColorMode>(octree_coloring_property_->getOptionInt());
   float cell_probability;
+  cv::Vec3d rgb;
   switch (octree_color_mode)
   {
     case OCTOMAP_CELL_COLOR:
@@ -409,6 +421,10 @@ void TemplatedOccupancyGridDisplay<OcTreeType>::setVoxelColor(PointCloud::Point&
     case OCTOMAP_PROBABLILTY_COLOR:
       cell_probability = node.getOccupancy();
       newPoint.setColor((1.0f-cell_probability), cell_probability, 0.0);
+      break;
+    case OCTOMAP_LABEL_COLOR:
+      rgb = cv_bridge::rgb_colors::getRGBColor(0);
+      newPoint.setColor(rgb[0], rgb[1], rgb[2], node.getOccupancy());
       break;
     default:
       break;
@@ -423,6 +439,7 @@ void TemplatedOccupancyGridDisplay<octomap::ColorOcTree>::setVoxelColor(PointClo
 {
   float cell_probability;
   OctreeVoxelColorMode octree_color_mode = static_cast<OctreeVoxelColorMode>(octree_coloring_property_->getOptionInt());
+  cv::Vec3d rgb;
   switch (octree_color_mode)
   {
     case OCTOMAP_CELL_COLOR:
@@ -438,6 +455,49 @@ void TemplatedOccupancyGridDisplay<octomap::ColorOcTree>::setVoxelColor(PointClo
     case OCTOMAP_PROBABLILTY_COLOR:
       cell_probability = node.getOccupancy();
       newPoint.setColor((1.0f-cell_probability), cell_probability, 0.0);
+      break;
+    case OCTOMAP_LABEL_COLOR:
+      rgb = cv_bridge::rgb_colors::getRGBColor(0);
+      newPoint.setColor(rgb[0], rgb[1], rgb[2], node.getOccupancy());
+      break;
+    default:
+      break;
+  }
+}
+
+template <>
+void TemplatedOccupancyGridDisplay<octomap::LabelOccupancyOcTree>::setVoxelColor(
+    PointCloud::Point& newPoint, octomap::LabelOccupancyOcTree::NodeType& node, double minZ, double maxZ)
+{
+  OctreeVoxelColorMode octree_color_mode = static_cast<OctreeVoxelColorMode>(octree_coloring_property_->getOptionInt());
+  std::valarray<float> cell_proba = node.getOccupancy();
+  cv::Vec3d rgb;
+  double max_probability = 0.0;
+  switch (octree_color_mode)
+  {
+    case OCTOMAP_CELL_COLOR:
+    {
+      setStatus(StatusProperty::Error, "Messages", QString("Cannot extract color"));
+      //Intentional fall-through for else-case
+    }
+    case OCTOMAP_Z_AXIS_COLOR:
+      setColor(newPoint.position.z, minZ, maxZ, color_factor_, newPoint);
+      break;
+    case OCTOMAP_PROBABLILTY_COLOR:
+      newPoint.setColor((1.0 - cell_proba.max()), cell_proba.max(), 0.0);
+      break;
+    case OCTOMAP_LABEL_COLOR:
+      int label;
+      for (int i=0; i < cell_proba.size(); i++)
+      {
+        if (cell_proba[i] > max_probability)
+        {
+          label = i;
+          max_probability = cell_proba[i];
+        }
+      }
+      rgb = cv_bridge::rgb_colors::getRGBColor(label);
+      newPoint.setColor(rgb[0], rgb[1], rgb[2], max_probability);
       break;
     default:
       break;
@@ -598,8 +658,9 @@ void TemplatedOccupancyGridDisplay<OcTreeType>::incomingMessageCallback(const oc
 typedef octomap_rviz_plugin::TemplatedOccupancyGridDisplay<octomap::OcTree> OcTreeGridDisplay;
 typedef octomap_rviz_plugin::TemplatedOccupancyGridDisplay<octomap::ColorOcTree> ColorOcTreeGridDisplay;
 typedef octomap_rviz_plugin::TemplatedOccupancyGridDisplay<octomap::OcTreeStamped> OcTreeStampedGridDisplay;
+typedef octomap_rviz_plugin::TemplatedOccupancyGridDisplay<octomap::LabelOccupancyOcTree> LabelOccupancyOcTreeGridDisplay;
 
 PLUGINLIB_EXPORT_CLASS( OcTreeGridDisplay, rviz::Display)
 PLUGINLIB_EXPORT_CLASS( ColorOcTreeGridDisplay, rviz::Display)
 PLUGINLIB_EXPORT_CLASS( OcTreeStampedGridDisplay, rviz::Display)
-
+PLUGINLIB_EXPORT_CLASS( LabelOccupancyOcTreeGridDisplay, rviz::Display)

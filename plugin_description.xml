@@ -36,5 +36,9 @@
       Displays projected 2D occupancy maps generated from compressed octomap messages.
     </description>
   </class>
+  <class name="octomap_rviz_plugin/LabelOccupancyOcTreeGrid"
+         type="LabelOccupancyOcTreeGridDisplay"
+         base_class_type="rviz::Display">
+  </class>
 </library>
   
